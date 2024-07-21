@@ -108,6 +108,8 @@ restaurants = [
     "더 가든 키친",
     "더 스테이크 하우스"
 ]
+
+
 class Scraper:
 
     def __init__(self) -> None:
@@ -120,7 +122,7 @@ class Scraper:
         self._urls = base_url.get_url()
 
     def main(self) -> None:
-        for keyword, url in zip(self._urls.keys(),self._urls.values()):
+        for keyword, url in zip(self._urls.keys(), self._urls.values()):
             self.get_review(_keyword=keyword, _url=url)
             # scraper.view_reviews()
         self.get_csv_file()
@@ -165,21 +167,21 @@ class Scraper:
                 "html.parser",
             )
 
-            return soup.find("div", class_="se-main-container").text
+            return soup.find("div", class_="se-main-container").text.replace("\n", "")
         except:
             return None
 
     def get_csv_file(self) -> None:
-        with open("review.csv","w") as file:
+        with open("review.csv", "w") as file:
             writer = csv.writer(file)
             writer.writerow(
-            [
-                "Name",
-                "Title",
-                "Link",
-                "Description",
-                "Main",
-            ]
+                [
+                    "Name",
+                    "Title",
+                    "Link",
+                    "Description",
+                    "Main",
+                ]
             )
             for review in self._reviews:
                 writer.writerow(review.get_review_dict().values())
