@@ -1,4 +1,6 @@
-from config import RESTAURANTS
+import requests
+
+from config import RESTAURANTS, KAKAO_RESTAPI
 from database.diningcode_db import excute_query
 from config import CONNECTION
 
@@ -8,12 +10,9 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 
-import re
 import time
-from datetime import datetime
 
 
-# (1). RESTAURANTS 리스트를 한번씩 돌면서 식당 이름, 리뷰 제목, 리뷰 링크, 리뷰 요약 수집 (데이터베이스에 바로 연동)
 class ReviewCrawler:
     """
     다이닝 코드 크롤링 클래스
@@ -22,7 +21,6 @@ class ReviewCrawler:
     """
 
     def __init__(self) -> object:
-        self._review_links = []  # 필요할까? -> 데이터베이스에서 블로그 크롤링 시 링크만 모두 담아오기
         self._browser: object
 
         ChromeDriverManager().install()
@@ -51,11 +49,18 @@ class ReviewCrawler:
             try:
                 if condition == 1:
                     # 1-1) searchIframe에 검색 식당이 1개인 경우
+                    restaurant_address = self._get_restaurant_address()
+                    latitude, longitude = self._get_restaurant_location(restaurant_address)
+                    self.set_restaurant_table(restaurant, restaurant_address, latitude, longitude)
                     self._browser.switch_to.default_content()
                     self.process_review(restaurant=restaurant)
 
                 elif condition == 2:
                     # 1-2) searchIframe이 검색 식당이 여러 개인 경우
+                    restaurant_address = self._get_restaurant_address()
+                    latitude, longitude = self._get_restaurant_location(restaurant_address)
+                    self.set_restaurant_table(restaurant, restaurant_address, latitude, longitude)
+
                     first_result = self._browser.find_element(By.CLASS_NAME, "place_bluelink")
                     first_result.click()
                     time.sleep(2)  # 클릭 후 반응까지 2초 대기
@@ -65,7 +70,7 @@ class ReviewCrawler:
             except:
                 # 1-3) 망해서 사라진 가게
                 self._browser.switch_to.default_content()
-                self.set_restaurant_table(restaurant)
+                self.set_restaurant_table(restaurant, "x", "x", "x")
                 self.get_review_db(name=restaurant, title="x", link="x",
                                    description="망함")
             # 다음 검색어를 입력하기 위해서 검색창 비우기
@@ -77,7 +82,7 @@ class ReviewCrawler:
 
     def process_review(self, restaurant: str) -> None:
         """
-        블로그 리뷰 크롤링의 메인 part 매서드
+        블로그 리뷰 크롤링의 메인 매서드
         :param restaurant: 검색 식당
         :return: None
         """
@@ -99,8 +104,6 @@ class ReviewCrawler:
 
         # 여기부터 리뷰 크롤링
         reviews = self._browser.find_elements(By.CLASS_NAME, "xg2_q")
-
-        self.set_restaurant_table(restaurant)
 
         for review in reviews:
             review_title = review.find_element(By.CLASS_NAME, "s2opK").text
@@ -133,17 +136,17 @@ class ReviewCrawler:
             return 2
 
     @staticmethod
-    def set_restaurant_table(restaurant: str) -> None:
+    def set_restaurant_table(restaurant: str, address: str, latitude: str, longitude: str) -> None:
         """
         restaurant 테이블에 크롤링 하는 식당 이름을 생성 매서드
         :param restaurant: 식당명
         :return: None
         """
         sql_restaurants_table = """
-                               insert into restaurants (restaurant_name)
-                               values (%s)
+                               insert into restaurants (restaurant_name, restaurant_address, restaurant_latitude, restaurant_longitude)
+                               values (%s, %s, %s, %s)
                                """
-        excute_query(CONNECTION, sql_restaurants_table, restaurant)
+        excute_query(CONNECTION, sql_restaurants_table, restaurant, address, latitude, longitude)
 
     @staticmethod
     def get_review_db(name: str, title: str, link: str, description: str) -> None:
@@ -181,8 +184,45 @@ class ReviewCrawler:
         """
         excute_query(CONNECTION, sql, restaurant)
 
-    # (2). 모은 블로그 리스트를 순회하며 블로그 main 내용 수집 -> 이건 다른 클래스로 만들기
+    def _get_restaurant_address(self):
+        return self._browser.find_element(By.CLASS_NAME, "Pb4bU").text
 
+    @staticmethod
+    def _get_restaurant_location(restaurant_address):
+
+        api_key = KAKAO_RESTAPI
+
+        query = restaurant_address
+
+        url = 'https://dapi.kakao.com/v2/local/search/address.json'
+
+        headers = {
+            'Authorization': f'KakaoAK {api_key}'
+        }
+
+        params = {
+            'query': query
+        }
+
+        response = requests.get(url, headers=headers, params=params)
+
+        if response.status_code == 200:
+            result = response.json()
+            documents = result['documents']
+
+            if documents:
+                # 첫 번째 결과에서 위도와 경도 정보 추출
+                address_info = documents[0]['address']
+                longitude = address_info['x']
+                latitude = address_info['y']
+
+                return latitude, longitude
+            else:
+                print("No results found.")
+                return
+        else:
+            print(f"Error: {response.status_code}")
+            return
 
 # (3). 데이터베이스의 셋팅 테이블에 식당별 리뷰 크롤링 (ok), 블로그 크롤링 유무 체크 (x)
 
@@ -195,4 +235,3 @@ class ReviewCrawler:
 # (7). 로그 남기는 기능
 
 # (8). 객체 지향 방식으로 리팩토링
-
